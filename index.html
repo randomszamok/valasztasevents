@@ -66,11 +66,16 @@
     }
     .multi-trigger::after { content: '▾'; float: right; color: #6b7b8d; }
     .multi.open .multi-trigger { border-color: #7ea2d6; box-shadow: 0 0 0 2px rgba(15, 74, 163, 0.1); }
+    .multi.has-selection .multi-trigger {
+      border-color: #2f9e44;
+      box-shadow: inset 3px 0 0 #2f9e44;
+      background: #f6fcf8;
+    }
     .multi-panel {
       position: absolute;
       top: calc(100% + 6px);
       left: 0;
-      right: 0;
+      right: auto;
       z-index: 40;
       background: #fff;
       border: 1px solid var(--line);
@@ -78,10 +83,17 @@
       box-shadow: var(--shadow);
       padding: 8px;
       display: none;
-      max-height: 280px;
+      min-width: 100%;
+      width: max-content;
+      max-width: min(560px, 90vw);
+      max-height: 420px;
       overflow: auto;
     }
     .multi.open .multi-panel { display: block; }
+    #status .multi-panel {
+      max-width: min(680px, 92vw);
+      max-height: 520px;
+    }
     .multi-search {
       width: 100%;
       margin-bottom: 6px;
@@ -223,7 +235,7 @@
       </div>
       <div class="viz-card">
         <div class="viz-head">
-          <p class="viz-title">Átlagidő: Ajánlóív -> Nyilvántartásba vétel</p>
+          <p class="viz-title">Átlagidő: Ajánlóív -> Nyilvántartásba vétel (jogerős + nem jogerős)</p>
           <button id="leadTimeFsBtn" type="button" class="icon-btn">Teljes képernyő</button>
         </div>
         <div id="leadTimeChartWrap" class="chart-wrap">
@@ -318,6 +330,7 @@
     let lastFocusedEl = null;
     let sortKey = 'timestamp';
     let sortDir = 'desc';
+    const REGISTERED_STATUS_CODES = new Set(['1', '1.1', '5']);
 
     snapshotCountEl.textContent = snapshots.length.toLocaleString();
     const eventsAsc = [...events].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
@@ -361,7 +374,7 @@
         if (!firstPickupTs && ev.status_after === '12') {
           firstPickupTs = ev.timestamp;
         }
-        if (firstPickupTs && ev.status_after === '5' && ev.timestamp >= firstPickupTs) {
+        if (firstPickupTs && REGISTERED_STATUS_CODES.has(ev.status_after) && ev.timestamp >= firstPickupTs) {
           registeredTs = ev.timestamp;
           break;
         }
@@ -426,12 +439,15 @@
       }
 
       function updateTrigger() {
+        const placeholder = opts.placeholder || 'Összes';
+        trigger.textContent = placeholder;
         if (!selected.size) {
-          trigger.textContent = opts.placeholder || 'Összes';
+          rootEl.classList.remove('has-selection');
+          trigger.title = placeholder;
           return;
         }
-        const picked = items.filter((x) => selected.has(x.value)).map((x) => x.label);
-        trigger.textContent = picked.length <= 2 ? picked.join(', ') : `${picked.length} kiválasztva`;
+        rootEl.classList.add('has-selection');
+        trigger.title = `${selected.size} kiválasztva`;
       }
 
       function open() { rootEl.classList.add('open'); }
@@ -483,6 +499,8 @@
 
     const STATUS_COLORS = {
       '0': '#0a84a5',
+      '1': '#1f8a4d',
+      '1.1': '#2f9e44',
       '5': '#b63f2d',
       '12': '#4063d8',
       '15': '#8e44ad',
@@ -967,7 +985,7 @@
         if (filters.partySet.size && !filters.partySet.has(party)) continue;
         if (filters.countySet.size && !filters.countySet.has(row.county_name || '')) continue;
         if (filters.constituencySet.size && !filters.constituencySet.has(row.constituency_name || '')) continue;
-        if (row.status !== '5') continue;
+        if (!REGISTERED_STATUS_CODES.has(row.status)) continue;
         if (!registeredByParty.has(party)) registeredByParty.set(party, new Set());
         registeredByParty.get(party).add(row.constituency_name || '');
       }
@@ -992,7 +1010,7 @@
               borderWidth: 1,
             },
             {
-              label: 'Nyilvántartásba vett körzet',
+              label: 'Nyilvántartásba vett körzet (jogerős + nem jogerős)',
               data: registered,
               backgroundColor: '#0f4aa3',
               borderColor: '#0f4aa3',
