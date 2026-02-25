@@ -157,12 +157,53 @@
     .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
     .modal-title { margin: 0; font-size: 18px; }
     .modal-close { width: auto; padding: 6px 10px; }
-    .timeline-list { margin: 10px 0 0; padding-left: 18px; font-size: 13px; }
-    .timeline-list li { margin: 6px 0; }
+    .candidate-summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin: 8px 0 10px;
+    }
+    .summary-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+      background: #f8fbff;
+      min-width: 0;
+    }
+    .summary-k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .summary-v { margin-top: 4px; font-size: 13px; font-weight: 700; color: #10243c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .timeline-list {
+      list-style: none;
+      margin: 10px 0 0;
+      padding: 0;
+      border-top: 1px solid var(--line);
+    }
+    .timeline-item {
+      padding: 10px 2px;
+      border-bottom: 1px solid var(--line);
+      display: grid;
+      gap: 4px;
+    }
+    .timeline-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .timeline-time { font-size: 12px; color: #2a3e58; font-weight: 700; }
+    .timeline-event {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .timeline-event.added { background: #00a65a; }
+    .timeline-event.status_changed { background: #006edc; }
+    .timeline-event.removed { background: #e03131; }
+    .timeline-status { font-size: 13px; color: #10243c; font-weight: 600; }
+    .timeline-meta { font-size: 12px; color: var(--muted); }
     @media (max-width: 960px) {
       .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .controls { grid-template-columns: 1fr 1fr; }
       .viz-grid { grid-template-columns: 1fr; }
+      .candidate-summary { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
@@ -274,9 +315,7 @@
         <h2 id="candidateModalTitle" class="modal-title">Jelölt esemény-idősor</h2>
         <button id="candidateModalClose" class="modal-close" type="button">Bezárás</button>
       </div>
-      <div class="chart-wrap" style="margin-top:8px;">
-        <canvas id="candidateTimeline" class="viz-canvas"></canvas>
-      </div>
+      <div id="candidateSummary" class="candidate-summary"></div>
       <ul id="candidateTimelineList" class="timeline-list"></ul>
     </div>
   </div>
@@ -318,14 +357,13 @@
     const candidateModalEl = document.getElementById('candidateModal');
     const candidateModalCloseEl = document.getElementById('candidateModalClose');
     const candidateModalTitleEl = document.getElementById('candidateModalTitle');
-    const candidateTimelineEl = document.getElementById('candidateTimeline');
+    const candidateSummaryEl = document.getElementById('candidateSummary');
     const candidateTimelineListEl = document.getElementById('candidateTimelineList');
     const sortHeaders = Array.from(document.querySelectorAll('th.sortable'));
     let eventChart = null;
     let snapshotChart = null;
     let leadTimeChart = null;
     let coverageChart = null;
-    let candidateChart = null;
     let renderTimer = null;
     let lastFocusedEl = null;
     let sortKey = 'timestamp';
@@ -1044,104 +1082,56 @@
 
       candidateModalTitleEl.textContent = `${rowEvent.name} esemény-idősora`;
       if (!candidateEvents.length) {
+        candidateSummaryEl.innerHTML = '';
         candidateTimelineListEl.innerHTML = '';
         candidateModalEl.classList.add('open');
         return;
       }
 
-      const statusCodes = Array.from(
-        new Set(
-          candidateEvents.flatMap((e) => [e.status_before, e.status_after]).filter(Boolean)
-        )
-      ).sort((a, b) => Number(a) - Number(b));
-      const statusToY = new Map(statusCodes.map((code, idx) => [code, idx + 1]));
-
-      const labelsRaw = candidateEvents.map((e) => e.timestamp);
-      const labels = labelsRaw.map(formatAxisTime);
-      const values = candidateEvents.map((e) => {
-        const status = e.status_after || e.status_before || '';
-        return status ? (statusToY.get(status) || null) : null;
-      });
-      const pointColors = candidateEvents.map((e) => {
-        if (e.event_type === 'added') return '#00a65a';
-        if (e.event_type === 'status_changed') return '#006edc';
-        if (e.event_type === 'removed') return '#e03131';
-        return '#0f4aa3';
-      });
-
-      if (candidateChart) candidateChart.destroy();
-      candidateChart = new Chart(candidateTimelineEl.getContext('2d'), {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [{
-            label: 'esemény',
-            data: values,
-            borderColor: '#0f4aa3',
-            backgroundColor: '#0f4aa3',
-            pointBackgroundColor: pointColors,
-            pointBorderColor: pointColors,
-            pointRadius: 4,
-            pointHoverRadius: 5,
-            tension: 0.1,
-            spanGaps: false,
-          }],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              callbacks: {
-                title: (items) => items.length ? formatDateTime(labelsRaw[items[0].dataIndex]) : '',
-                label: (ctx) => {
-                  const ev = candidateEvents[ctx.dataIndex];
-                  const evLabel = EVENT_TYPE_LABELS[ev.event_type] || ev.event_type;
-                  return `esemény: ${evLabel}`;
-                },
-                afterLabel: (ctx) => {
-                  const ev = candidateEvents[ctx.dataIndex];
-                  const before = ev.status_before ? statusLabel(ev.status_before) : '';
-                  const after = ev.status_after ? statusLabel(ev.status_after) : '';
-                  if (before && after) return `állapot: ${before} → ${after}`;
-                  if (after) return `állapot: ${after}`;
-                  if (before) return `állapot: ${before}`;
-                  return '';
-                },
-              },
-            },
-          },
-          scales: {
-            x: {
-              ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
-            },
-            y: {
-              min: 0,
-              max: Math.max(1.5, statusCodes.length + 0.5),
-              ticks: {
-                stepSize: 1,
-                callback: (v) => {
-                  const idx = Number(v) - 1;
-                  if (idx < 0 || idx >= statusCodes.length) return '';
-                  return statusLabel(statusCodes[idx]);
-                },
-              },
-            },
-          },
-        },
-      });
+      const firstEvent = candidateEvents[0];
+      const lastEvent = candidateEvents[candidateEvents.length - 1];
+      const latestStatusCode = lastEvent.status_after || lastEvent.status_before || '';
+      const changedCount = candidateEvents.filter((e) => e.event_type === 'status_changed').length;
+      const removedCount = candidateEvents.filter((e) => e.event_type === 'removed').length;
+      const addedCount = candidateEvents.filter((e) => e.event_type === 'added').length;
+      candidateSummaryEl.innerHTML = `
+        <div class="summary-card">
+          <div class="summary-k">Aktuális státusz</div>
+          <div class="summary-v">${statusLabel(latestStatusCode) || 'Nincs'}</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-k">Első esemény</div>
+          <div class="summary-v">${formatDateTime(firstEvent.timestamp)}</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-k">Utolsó esemény</div>
+          <div class="summary-v">${formatDateTime(lastEvent.timestamp)}</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-k">Események</div>
+          <div class="summary-v">${candidateEvents.length} (új: ${addedCount}, váltás: ${changedCount}, törölt: ${removedCount})</div>
+        </div>
+      `;
 
       candidateTimelineListEl.innerHTML = '';
       for (const ev of candidateEvents) {
         const li = document.createElement('li');
+        li.className = 'timeline-item';
         const before = ev.status_before ? statusLabel(ev.status_before) : '';
         const after = ev.status_after ? statusLabel(ev.status_after) : '';
-        let statusPart = '';
-        if (before && after) statusPart = ` • ${before} → ${after}`;
-        else if (after) statusPart = ` • ${after}`;
-        else if (before) statusPart = ` • ${before}`;
-        li.textContent = `${formatDateTime(ev.timestamp)} • ${EVENT_TYPE_LABELS[ev.event_type] || ev.event_type}${statusPart}`;
+        const eventLabel = EVENT_TYPE_LABELS[ev.event_type] || ev.event_type;
+        const statusPart = before && after
+          ? `${before} → ${after}`
+          : (after || before || 'Státusz nincs');
+        const constituency = ev.constituency_name || `${ev.county_name || ''} • ${ev.maz || ''}-${ev.evk || ''}`;
+        li.innerHTML = `
+          <div class="timeline-head">
+            <span class="timeline-time">${formatDateTime(ev.timestamp)}</span>
+            <span class="timeline-event ${ev.event_type}">${eventLabel}</span>
+          </div>
+          <div class="timeline-status">${statusPart}</div>
+          <div class="timeline-meta">${constituency}</div>
+        `;
         candidateTimelineListEl.appendChild(li);
       }
 
@@ -1174,7 +1164,6 @@
       if (snapshotChart) snapshotChart.resize();
       if (leadTimeChart) leadTimeChart.resize();
       if (coverageChart) coverageChart.resize();
-      if (candidateChart) candidateChart.resize();
     }
 
     function scheduleResizeAllCharts() {
@@ -1188,7 +1177,7 @@
 
     function resetCanvasSizing() {
       const wrappers = [eventChartWrap, snapshotChartWrap, leadTimeChartWrap, coverageChartWrap];
-      const canvases = [eventTimelineEl, snapshotTimelineEl, leadTimeChartEl, coverageChartEl, candidateTimelineEl];
+      const canvases = [eventTimelineEl, snapshotTimelineEl, leadTimeChartEl, coverageChartEl];
       for (const w of wrappers) {
         w.style.width = '';
         w.style.height = '';
